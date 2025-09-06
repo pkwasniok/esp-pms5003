@@ -1,2 +1,3 @@
 idf_component_register(SRCS "src/pms5003.c"
-                    INCLUDE_DIRS "include")
+                    INCLUDE_DIRS "include"
+                    REQUIRES "esp_driver_uart")
