@@ -1,0 +1,5 @@
+version: "1.0.0"
+dependencies:
+  pkwasniok/pms5003:
+    version: "*"
+    override_path: "../../../"
