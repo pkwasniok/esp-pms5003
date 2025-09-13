@@ -5,8 +5,6 @@
 #include "freertos/queue.h"
 
 #include "esp_err.h"
-#include "driver/gpio.h"
-#include "driver/uart.h"
 
 #include "pms5003.h"
 
@@ -16,26 +14,19 @@
 void app_main(void) {
     pms5003_device_t pms5003;
 
-    pms5003_config_t pms5003_config = {
-        .uart_port = UART_NUM_0,
-        .uart_tx_ionum = GPIO_TX,
-        .uart_rx_ionum = GPIO_RX,
-    };
-
-    if (pms5003_init(&pms5003, &pms5003_config) != PMS5003_OK) {
-        printf("Error!\n");
-    }
+    ESP_ERROR_CHECK(pms5003_init(&pms5003, UART_NUM_0, GPIO_TX, GPIO_RX));
 
     while (1) {
-        pms5003_data_t particles;
+        uint16_t pm1, pm2, pm10;
 
-        if (pms5003_get(&pms5003, &particles) != PMS5003_OK) {
-            printf("Error\n");
+        if (pms5003_read(&pms5003, &pm1, &pm2, &pm10) == PMS5003_OK) {
+            printf("pm1.0: %d ug/m^3\n", pm1);
+            printf("pm2.5: %d ug/m^3\n", pm2);
+            printf("pm10.0: %d ug/m^3\n", pm10);
+        } else {
+            printf("Unable to read PMS5003!\n");
         }
 
-        printf("pm 1.0: %d ug/m^3\n", particles.pm1);
-        printf("pm 2.5: %d ug/m^3\n", particles.pm2);
-        printf("pm 10.0: %d ug/m^3\n", particles.pm10);
         printf("\n");
 
         vTaskDelay(1000 / portTICK_PERIOD_MS);

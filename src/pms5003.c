@@ -1,58 +1,85 @@
 #include "pms5003.h"
 
-#include "driver/uart.h"
+uint16_t _pms5003_checksum(uint8_t* buffer, int length) {
+    uint16_t checksum = 0;
 
-int pms5003_init(pms5003_handle_t device, pms5003_config_t* config) {
-    device->uart_port = config->uart_port;
+    for (int i = 0; i < length; i++)
+        checksum += buffer[i];
 
-    ESP_ERROR_CHECK(uart_driver_install(device->uart_port, 1024, 1024, 10, &(device->uart_queue), 0));
+    return checksum;
+}
 
-    uart_config_t uart_config = {
-        .baud_rate = 9600,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
+int _pms5003_write(pms5003_handle_t device, uint8_t command, uint16_t data) {
+    uint8_t buffer[7];
 
-    ESP_ERROR_CHECK(uart_param_config(device->uart_port, &uart_config));
+    buffer[0] = 0x42;
+    buffer[1] = 0x4D;
+    buffer[2] = command;
+    buffer[3] = (data >> 8);
+    buffer[4] = data;
 
-    ESP_ERROR_CHECK(uart_set_pin(device->uart_port, config->uart_tx_ionum, config->uart_rx_ionum, -1, -1));
+    uint16_t checksum = _pms5003_checksum(buffer, 5);
+
+    buffer[5] = checksum >> 8;
+    buffer[6] = checksum;
+
+    if (uart_write_bytes(device->uart_port, buffer, 7) != 7)
+        return PMS5003_ERROR;
+
+    if (uart_wait_tx_done(device->uart_port, 1000 / portTICK_PERIOD_MS) != ESP_OK)
+        return PMS5003_ERROR;
 
     return PMS5003_OK;
 }
 
-int pms5003_get(pms5003_handle_t device, pms5003_data_t* data) {
-    int length = 0;
+int pms5003_init(pms5003_handle_t device, int uart_port, int uart_tx_ionum, int uart_rx_ionum) {
+    device->uart_port = uart_port;
 
-    while (length == 0)
-        uart_get_buffered_data_len(device->uart_port, (size_t*)&length);
+    uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .stop_bits = UART_STOP_BITS_1,
+        .parity = UART_PARITY_DISABLE,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    };
 
-    uint8_t buffer[128];
-    length = uart_read_bytes(device->uart_port, buffer, length, 100);
-
-    if (length < 32) {
+    if (uart_param_config(device->uart_port, &uart_config) != ESP_OK)
         return PMS5003_ERROR;
-    }
 
-    if (buffer[0] != 0x42 || buffer[1] != 0x4D) {
+    if (uart_set_pin(device->uart_port, uart_tx_ionum, uart_rx_ionum, -1, -1) != ESP_OK)
         return PMS5003_ERROR;
-    }
 
-    uint16_t received_checksum = (buffer[30] << 8) | buffer[31];
-
-    uint16_t calculated_checksum = 0;
-    for (int i = 0; i < 30; i++)
-        calculated_checksum += buffer[i];
-
-    if (received_checksum != calculated_checksum) {
+    if (uart_driver_install(device->uart_port, 511, 512, 10, &device->uart_queue, 0) != ESP_OK)
         return PMS5003_ERROR;
-    }
 
-    data->pm1 = (buffer[4] << 8) | buffer[5];
-    data->pm2 = (buffer[6] << 8) | buffer[7];
-    data->pm10 = (buffer[8] << 8) | buffer[9];
+    if (_pms5003_write(device, 0xE1, 0x0000) != PMS5003_OK)
+        return PMS5003_ERROR;
+
+    return PMS5003_OK;
+}
+
+int pms5003_read(pms5003_handle_t device, uint16_t* pm1, uint16_t* pm2, uint16_t* pm10) {
+    uint8_t buffer[32];
+
+    if (uart_flush(device->uart_port) != ESP_OK)
+        return PMS5003_ERROR;
+
+    if (_pms5003_write(device, 0xE2, 0x0000) != PMS5003_OK)
+        return PMS5003_ERROR;
+
+    if (uart_read_bytes(device->uart_port, buffer, 32, 1000 / portTICK_PERIOD_MS) != 32)
+        return PMS5003_ERROR;
+
+    if (buffer[0] != 0x42 || buffer[1] != 0x4D)
+        return PMS5003_ERROR;
+
+    uint16_t checksum_received = (buffer[30] << 8) | buffer[31];
+    if (checksum_received != _pms5003_checksum(buffer, 30))
+        return PMS5003_ERROR;
+
+    (*pm1) = (buffer[4] << 8) | buffer[5];
+    (*pm2) = (buffer[6] << 8) | buffer[7];
+    (*pm10) = (buffer[8] << 8) | buffer[9];
 
     return PMS5003_OK;
 }
