@@ -1,4 +1,5 @@
 #include "pms5003.h"
+#include "driver/gpio.h"
 
 uint16_t _pms5003_checksum(uint8_t* buffer, int length) {
     uint16_t checksum = 0;
@@ -32,8 +33,14 @@ int _pms5003_write(pms5003_handle_t device, uint8_t command, uint16_t data) {
     return PMS5003_OK;
 }
 
-int pms5003_init(pms5003_handle_t device, int uart_port, int uart_tx_ionum, int uart_rx_ionum) {
+int pms5003_init(pms5003_handle_t device, int uart_port, int uart_tx_ionum, int uart_rx_ionum, int mode_ionum) {
     device->uart_port = uart_port;
+    device->mode_ionum = mode_ionum;
+
+    if (device->mode_ionum != -1) {
+        gpio_set_direction(device->mode_ionum, GPIO_MODE_OUTPUT);
+        gpio_set_level(device->mode_ionum, 1);
+    }
 
     uart_config_t uart_config = {
         .baud_rate = 9600,
@@ -55,10 +62,29 @@ int pms5003_init(pms5003_handle_t device, int uart_port, int uart_tx_ionum, int 
     if (_pms5003_write(device, 0xE1, 0x0000) != PMS5003_OK)
         return PMS5003_ERROR;
 
+    if (pms5003_set_mode(device, PMS5003_MODE_NORMAL) != PMS5003_OK)
+        return PMS5003_ERROR;
+
     return PMS5003_OK;
 }
 
-int pms5003_read(pms5003_handle_t device, uint16_t* pm1, uint16_t* pm2, uint16_t* pm10) {
+int pms5003_set_mode(pms5003_handle_t device, pms5003_mode_t mode) {
+    if (device->mode_ionum == -1)
+        return PMS5003_OK;
+
+    switch (mode) {
+        case PMS5003_MODE_NORMAL:
+            gpio_set_level(device->mode_ionum, 1);
+            break;
+        case PMS5003_MODE_SLEEP:
+            gpio_set_level(device->mode_ionum, 0);
+            break;
+    }
+
+    return PMS5003_OK;
+}
+
+int pms5003_get_pm(pms5003_handle_t device, uint16_t* pm1, uint16_t* pm2, uint16_t* pm10) {
     uint8_t buffer[32];
 
     if (uart_flush(device->uart_port) != ESP_OK)
